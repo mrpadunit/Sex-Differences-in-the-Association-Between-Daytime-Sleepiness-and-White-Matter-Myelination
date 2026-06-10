@@ -1,0 +1,88 @@
+---
+title: "R Notebook"
+output:
+  html_document:
+    df_print: paged
+  pdf_document: default
+---
+
+Load packages
+```{r libraries}
+library(tidyverse)
+library(emmeans)
+library(openxlsx)
+```
+
+
+Reading in Data
+```{r}
+MRI <- read.xlsx("Fig4C_Data.xlsx", sheet = "MRI_processed")
+Z_score_stats <- read.xlsx("Fig4C_Data.xlsx", sheet = "Z_score_stats")
+
+```
+
+
+Effect Coding
+```{r}
+custom_contrast <- matrix(c(-1,1), ncol = 1) # defining a custom contrast where fem is -1 and male is 1
+rownames(custom_contrast) <- c("Female", "Male")
+MRI$sex <- factor(MRI$sex, levels = c("Female", "Male"))
+contrasts(MRI$sex) <- custom_contrast
+
+contrasts(MRI$sex)
+```
+
+
+Figure 4C
+```{r}
+formula <- as.formula("PC1_temporal ~ age + age_squared + sex + logWHIIRS + logWHIIRS*sex") 
+
+MRI_subset <- na.omit(MRI)
+
+fit1 <- lm(formula, data = MRI_subset) # Fit the model
+
+predictions <- emmeans(
+  fit1, 
+  ~ logWHIIRS, 
+  at = list(
+    logWHIIRS = seq(
+      min(MRI$logWHIIRS, na.rm = TRUE),
+      max(MRI$logWHIIRS, na.rm = TRUE),
+      length.out = 100
+    )
+  ), 
+  conf.int = TRUE # with confidence intervals
+)
+
+
+# Back-transform logWHIIRS, PC1_temporal, and confidence intervals
+predicted_df <- as.data.frame(predictions) %>%
+  mutate(x_original = logWHIIRS * Z_score_stats$sd_logWHIIRS + Z_score_stats$mean_logWHIIRS,
+    predicted_original = emmean * Z_score_stats$sd_PC1_temporal + Z_score_stats$mean_PC1_temporal,
+    conf_low_original = lower.CL * Z_score_stats$sd_PC1_temporal + Z_score_stats$mean_PC1_temporal,
+    conf_high_original = upper.CL * Z_score_stats$sd_PC1_temporal + Z_score_stats$mean_PC1_temporal)
+
+whole_title <- "PCD vs log(WHIIRS + 1) Score in the Temporal Lobe"
+
+# plot
+plot_roi <- ggplot() +
+  geom_point(data = MRI, aes(x = logWHIIRS_original, y = PC1_temporal_original), alpha = 0.5, color = 'forestgreen') +
+  geom_line(data = predicted_df, aes(x = x_original, y = predicted_original), size = 1, color = 'forestgreen') +
+  geom_ribbon(data = predicted_df, aes(x = x_original, ymin = conf_low_original, ymax = conf_high_original), 
+              fill = 'forestgreen', alpha = 0.2) +  # Add shaded confidence interval
+  theme_classic() +
+  
+  labs(title = whole_title, x = "log(WHIIRS + 1)", y = "PC1_temporal")
+
+print(plot_roi)
+
+
+```
+
+
+
+
+
+
+
+

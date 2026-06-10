@@ -1,0 +1,172 @@
+---
+title: "Model2_ROI_analysis_ZG"
+output:
+  html_document:
+    df_print: paged
+  pdf_document: default
+---
+
+Load packages
+```{r libraries, results = "hide", message = FALSE, warning = FALSE}
+library(tidyverse)
+library(readxl)
+library(ggpmisc)
+library(Matrix)
+library(lmerTest)
+require(cowplot)
+library(gridExtra)
+library(ggbeeswarm)
+library(reshape2)
+library(performance)
+library(ggeffects)
+require("gridExtra")
+library(latex2exp)
+library(stringr)
+library(ggtext)
+library(writexl)
+library(grid)
+library(rlang)
+library(purrr)
+library(ggpubr)
+
+```
+
+Importing the linear regression results
+```{r}
+relax_PC1_results <- read_excel("Table_S7.xlsx", sheet = 'TableS7_ESS_PCR')
+diff_PC1_results <- read_excel("Table_S7.xlsx", sheet = 'TableS7_ESS_PCD')
+combo_PC1_results <- read_excel("Table_S7.xlsx", sheet = 'TableS7_ESS_PCE')
+
+```
+
+
+Making the table of all the values together for the heatmap
+```{r}
+parameters <- c("Main Effect", "Sex Interaction", "Female", "Male")
+MRI_metrics <- c("relax_PC1", "diff_PC1", "combo_PC1")
+ROIs <- relax_PC1_results$ROI
+
+chart_df <- data.frame(parameter = character(), ROI = character(), modality = character(), p_value = numeric(), fdr_val = numeric(), coefficient = numeric(), stringsAsFactors = FALSE)
+
+for (metric in MRI_metrics){ # goes through every metric (MWF, R1, etc)
+  for (roi in ROIs){ # goes through every ROI
+   
+
+      beta <- as.numeric(get(paste0(metric, "_results"))[which(get(paste0(metric, "_results"))$ROI == roi), "beta EPSS"]) # remember, negated diffusivities before PCA
+      fdr <- as.numeric(get(paste0(metric, "_results"))[which(get(paste0(metric, "_results"))$ROI == roi), "fdr_sig EPSS"])
+      # Store results
+      chart_df <- rbind(chart_df, data.frame(parameter = "Main Effect", ROI = roi, modality = metric, coefficient = beta, fdr_val = fdr))
+
+      
+      beta <- as.numeric(get(paste0(metric, "_results"))[which(get(paste0(metric, "_results"))$ROI == roi), "beta sex1:EPSS"])
+      fdr <- as.numeric(get(paste0(metric, "_results"))[which(get(paste0(metric, "_results"))$ROI == roi), "fdr_sig sex1:EPSS"])
+      # Store results
+      chart_df <- rbind(chart_df, data.frame(parameter = "Sex Interaction", ROI = roi, modality = metric, coefficient = beta, fdr_val = fdr))
+      
+      
+      beta <- as.numeric(get(paste0(metric, "_results"))[which(get(paste0(metric, "_results"))$ROI == roi), "beta female EPSS"])
+      fdr <- as.numeric(get(paste0(metric, "_results"))[which(get(paste0(metric, "_results"))$ROI == roi), "fdr_sig female EPSS"])
+      # Store results
+      chart_df <- rbind(chart_df, data.frame(parameter = "Female", ROI = roi, modality = metric, coefficient = beta, fdr_val = fdr))
+      
+      
+      beta <- as.numeric(get(paste0(metric, "_results"))[which(get(paste0(metric, "_results"))$ROI == roi), "beta male EPSS"])
+      fdr <- as.numeric(get(paste0(metric, "_results"))[which(get(paste0(metric, "_results"))$ROI == roi), "fdr_sig male EPSS"])
+      # Store results
+      chart_df <- rbind(chart_df, data.frame(parameter = "Male", ROI = roi, modality = metric, coefficient = beta, fdr_val = fdr))
+  }
+}
+```
+
+
+
+%%%%%%%%%%%%%
+Make heatmap
+%%%%%%%%%%%%%
+
+Making heatmap-- main and sex int.
+```{r}
+heatmap <- chart_df %>%
+  filter(parameter %in% c("Main Effect", "Sex Interaction")) %>%  # <--- Filter out female and male
+  mutate(
+    ROI = ifelse(str_detect(ROI, "^[A-Z0-9_]+$"), ROI, str_to_title(ROI)), # capitalizes the ROI values
+    modality = factor(modality, levels = c("relax_PC1", "diff_PC1", "combo_PC1")),  # Custom order for modalities
+    parameter = factor(parameter, levels = c("Main Effect", "Sex Interaction")),  # Set custom order
+    star = case_when(
+      fdr_val <= 0.0001 ~ "****",
+      fdr_val <= 0.001 ~ "***",
+      fdr_val <= 0.01 ~ "* *",
+      fdr_val <= 0.05 ~ "*",
+      TRUE ~ ""  # not significant
+    )
+  )
+
+# Plot the heatmap with borders
+g <- ggplot(heatmap, aes(x = parameter, y = ROI, fill = coefficient)) +
+  ggtitle("ESS Significance") + 
+  geom_tile(color = "white", linewidth = 0.1) +  # Add borders to each tile
+  geom_text(aes(label = star), color = "black", size = 5, hjust = 0.5, vjust = 0.5, nudge_y = -.27) +  # Center text
+  scale_fill_gradientn(
+    colors = c("#4575B4", "#91BFDB", "#E0F3F8", "#FEE090", "#FC8D59", "#D73027"),
+    limits = c(-0.4, 0.4),   # uniform across most heatmaps
+    name = "B coefficient"
+  ) + 
+
+  facet_wrap(facets = ~modality, nrow = 1, labeller = as_labeller(c(relax_PC1 = "PCR", diff_PC1 = "PCD", combo_PC1 = "PCE"))) + 
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        axis.title.x = element_blank(),
+        axis.title.y = element_blank(),
+        panel.grid.major = element_blank(),  # Remove major gridlines
+        panel.grid.minor = element_blank(),  # Remove minor gridlines
+        axis.ticks = element_blank(),        # Remove axis ticks
+        panel.spacing = unit(0.03, "lines"))  # Reduce space between facets)  
+
+print(g)
+
+
+```
+
+Making heatmap-- female and male
+```{r}
+heatmap <- chart_df %>%
+  filter(parameter %in% c("Female", "Male")) %>%  # <--- Filter out main effect and sex int
+  mutate(
+    ROI = ifelse(str_detect(ROI, "^[A-Z0-9_]+$"), ROI, str_to_title(ROI)), # capitalizes the ROI values
+    modality = factor(modality, levels = c("relax_PC1", "diff_PC1", "combo_PC1")),  # Custom order for modalities
+    parameter = factor(parameter, levels = c("Female", "Male")),  # Set custom order
+    star = case_when(
+      fdr_val <= 0.0001 ~ "****",
+      fdr_val <= 0.001 ~ "***",
+      fdr_val <= 0.01 ~ "* *",
+      fdr_val <= 0.05 ~ "*",
+      TRUE ~ ""  # not significant
+    )
+  )
+
+# Plot the heatmap with borders
+g <- ggplot(heatmap, aes(x = parameter, y = ROI, fill = coefficient)) +
+  ggtitle("ESS Significance") + 
+  geom_tile(color = "white", linewidth = 0.1) +  # Add borders to each tile
+  geom_text(aes(label = star), color = "black", size = 5, hjust = 0.5, vjust = 0.5, nudge_y = -.27) +  # Center text
+  scale_fill_gradientn(
+    colors = c("#4575B4", "#91BFDB", "#E0F3F8", "#FEE090", "#FC8D59", "#D73027"),
+    limits = c(-0.5, 0.5),   # similar to other heatmaps 
+    name = "B coefficient"
+  ) + 
+
+  facet_wrap(facets = ~modality, nrow = 1, labeller = as_labeller(c(relax_PC1 = "PCR", diff_PC1 = "PCD", combo_PC1 = "PCE"))) + 
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        axis.title.x = element_blank(),
+        axis.title.y = element_blank(),
+        panel.grid.major = element_blank(),  # Remove major gridlines
+        panel.grid.minor = element_blank(),  # Remove minor gridlines
+        axis.ticks = element_blank(),        # Remove axis ticks
+        panel.spacing = unit(0.03, "lines"))  # Reduce space between facets)  
+
+print(g)
+
+
+```
+

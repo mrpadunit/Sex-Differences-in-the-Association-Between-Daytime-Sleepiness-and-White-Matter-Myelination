@@ -1,0 +1,159 @@
+---
+title: "R Notebook"
+output:
+  html_document:
+    df_print: paged
+  pdf_document: default
+---
+
+Load packages
+```{r libraries}
+library(tidyverse)
+library(readxl)
+#library(ggpmisc)
+library(Matrix)
+library(lmerTest)
+require(cowplot)
+library(gridExtra)
+library(ggbeeswarm)
+library(reshape2)
+library(performance)
+library(ggeffects)
+require("gridExtra")
+#library(latex2exp)
+library(stringr)
+library(ggtext)
+library(writexl)
+library(tools)
+
+library(emmeans)
+library("dplyr")
+library("openxlsx")
+library(corrplot)
+library(factoextra)
+library(missMDA)
+library(grid)
+
+
+```
+
+
+
+Reading in Data
+```{r}
+MRI <- read_excel("Fig3_Data.xlsx")
+```
+
+
+Figure 3A
+```{r}
+MRI_data <- data.frame(
+  MWF = MRI$MWF_WB_WM,
+  R1  = MRI$R1_WB_WM,
+  R2  = MRI$R2_WB_WM,
+  FA  = MRI$FA_WB_WM,
+  nAxD = -MRI$AxD_WB_WM, # negativing diffusivities
+  nMD  = -MRI$MD_WB_WM,
+  nRD  = -MRI$RD_WB_WM
+)
+
+# Compute correlation matrix
+MRI_cor_matrix <- cor(MRI_data, use = "complete.obs")
+
+# Melt the correlation matrix for ggplot
+melted_cor_matrix <- melt(MRI_cor_matrix, na.rm = TRUE)
+
+# Save heatmap as PNG
+corr <- ggplot(data = melted_cor_matrix, aes(x = Var1, y = Var2, fill = value)) +
+      geom_tile(color = "white") + # Add white borders to tiles
+      scale_fill_gradient2(low = "navy", high = "#800020", mid = "white", 
+                           midpoint = 0.5, limit = c(0, 1), 
+                           name = "Correlation") +
+      theme_minimal() +
+      labs(title = "Correlation Heatmap", x = "", y = "") +
+      theme(axis.text.x = element_text(angle = 45, vjust = 1, 
+                                       size = 10, hjust = 1),
+            axis.text.y = element_text(size = 10)) +
+      coord_fixed() # Ensures square tiles
+
+print(corr)
+
+
+```
+
+
+
+
+Figure 3B
+```{r}
+roi <- "WB"
+MWF_val <- "MWF_WB_WM"
+R1_val <- "R1_WB_WM"
+R2_val <- "R2_WB_WM"
+FA_val <- "FA_WB_WM"
+AxD_val <- "AxD_WB_WM"
+MD_val <- "MD_WB_WM"
+RD_val <- "RD_WB_WM"
+
+
+# Subset MRI to rows with no missing data for the current ROI's MWF, R1, and R2 values
+MRI_subset <- MRI %>%
+  filter(!is.na(.data[[MWF_val]]),
+         !is.na(.data[[R1_val]]),
+         !is.na(.data[[R2_val]]),
+         !is.na(.data[[FA_val]]),
+         !is.na(.data[[AxD_val]]),
+         !is.na(.data[[MD_val]]),
+         !is.na(.data[[RD_val]]))%>%
+  mutate(across(all_of(c(AxD_val, MD_val, RD_val)), ~ -., .names = "{.col}")) # NEGATING DIFFUSIVITIES
+
+pca <- prcomp(MRI_subset[, c(MWF_val, R1_val, R2_val, FA_val, AxD_val, MD_val, RD_val)])
+colnames(pca$x) <- paste0("PC", 1:ncol(pca$x), "_", roi)
+
+scree_plot <- fviz_eig(pca) +
+        ggtitle(paste("Scree Plot -", roi))  + 
+  scale_y_continuous(expand = expansion(mult = c(0, 0.1)))
+
+print(scree_plot)
+
+```
+
+
+Figure 3C
+```{r}
+
+pc1_loadings <- pca$rotation[, 1]   # First PC loadings
+
+pc1_df <- data.frame(
+  Variable = names(pc1_loadings),
+  Contribution = pc1_loadings
+)
+
+# Extract PC1 loadings
+pc1_loadings <- pca$rotation[, 1]  # first column = PC1
+
+# Desired order
+desired_order <- c(MWF_val, R1_val, R2_val, FA_val, AxD_val, MD_val, RD_val)
+
+# Convert Variable to factor with specified order
+pc1_df$Variable <- factor(pc1_df$Variable, levels = desired_order)
+
+# Bar chart with bars in specified order
+pc1_contribution <- ggplot(pc1_df, aes(x = Variable, y = Contribution)) +
+  geom_bar(stat = "identity", fill = "#967bb6") +
+  theme_minimal() +
+  labs(title = paste("PC1 Loadings -", roi),
+       x = "Variable",
+       y = "Contribution to PC1") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) + 
+  scale_y_continuous(expand = expansion(mult = c(0, 0.25)))  # add 5% extra space on top
+
+print(pc1_contribution)
+
+```
+
+
+
+
+
+

@@ -1,0 +1,94 @@
+---
+title: "R Notebook"
+output:
+  html_document:
+    df_print: paged
+  pdf_document: default
+---
+
+Load packages
+```{r libraries}
+library(tidyverse)
+library(readxl)
+library(stringr)
+library(emmeans)
+library(tools)
+```
+
+Reading in Data
+```{r}
+MRI <- read_excel("Fig1B_Data.xlsx", sheet = "MRI_processed")
+Z_score_stats <- read_excel("Fig1B_Data.xlsx", sheet = "Z_score_stats")
+
+```
+
+
+Effect Coding
+```{r}
+custom_contrast <- matrix(c(-1,1), ncol = 1) # defining a custom contrast where fem is -1 and male is 1
+rownames(custom_contrast) <- c("Female", "Male")
+MRI$sex <- factor(MRI$sex, levels = c("Female", "Male"))
+contrasts(MRI$sex) <- custom_contrast
+
+contrasts(MRI$sex)
+
+```
+
+Figure 1B
+```{r}
+formula <- as.formula("MWF_temporal_WM ~ age_MWF + age_squared_MWF + sex + EPSS_MWF + EPSS_MWF:sex")
+
+MRI_subset <- na.omit(MRI)
+
+fit1 <- lm(formula, data = MRI_subset) # Fit the model
+
+predictions <- emmeans(
+  fit1, 
+  ~ EPSS_MWF | sex,  # Dynamically set the formula
+  at = list(
+    EPSS_MWF = seq(
+      min(MRI$EPSS_MWF, na.rm = TRUE),
+      max(MRI$EPSS_MWF, na.rm = TRUE),
+      length.out = 100
+    )
+  ), 
+  conf.int = TRUE # with confidence intervals
+)
+
+
+# Back-transform EPSS, metric_WM, and the confidence intervals
+predicted_df <- as.data.frame(predictions) %>%
+  mutate(x_original = EPSS_MWF * Z_score_stats$sd_EPSS_MWF + Z_score_stats$mean_EPSS_MWF,
+    predicted_original = emmean * Z_score_stats$sd_MWF_temporal_WM + Z_score_stats$mean_MWF_temporal_WM,
+    conf_low_original = lower.CL * Z_score_stats$sd_MWF_temporal_WM + Z_score_stats$mean_MWF_temporal_WM,
+    conf_high_original = upper.CL * Z_score_stats$sd_MWF_temporal_WM + Z_score_stats$mean_MWF_temporal_WM)
+
+whole_title <- "MWF vs ESS Score in the Temporal Lobe by Sex"
+
+# plot
+plot_roi <- ggplot() +
+  geom_point(data = MRI, aes(x = EPSS_original, y = temporal_WM_MWF_original, color = sex), alpha = 0.5, size = 3) + 
+  geom_line(data = predicted_df, aes(x = x_original, y = predicted_original, color = sex), size = 1) +
+  geom_ribbon(data = predicted_df, aes(x = x_original, ymin = conf_low_original, ymax = conf_high_original, fill = sex), 
+              alpha = 0.2) +  # Add shaded confidence interval
+  theme_classic() +
+  
+  theme(
+    axis.ticks.x = element_line(size = 0.75),
+    axis.ticks.y = element_line(size = 0.75),
+    axis.ticks.length = unit(0.3, "cm"),
+    axis.line.x = element_line(size = 0.75, color = "black"),  # Add x-axis line
+    axis.line.y = element_line(size = 0.75, color = "black"),  # Add y-axis line
+    
+  ) + 
+  
+  labs(title = whole_title, x = "ESS Score", y = "MWF") +
+  
+  scale_color_manual(values = c("Male" = "#00A3C4", "Female" = "#E63946")) +
+  scale_fill_manual(values = c("Male" = "#00A3C4", "Female" = "#E63946"))
+
+print(plot_roi)
+
+
+```
+

@@ -1,0 +1,90 @@
+---
+title: "R Notebook"
+output:
+  html_document:
+    df_print: paged
+  pdf_document: default
+---
+
+Load packages
+```{r libraries}
+library(tidyverse)
+library(openxlsx)
+library(emmeans)
+```
+
+
+Reading in Data
+```{r}
+MRI <- read.xlsx("Fig4B_Data.xlsx", sheet = "MRI_processed")
+Z_score_stats <- read.xlsx("Fig4B_Data.xlsx", sheet = "Z_score_stats")
+
+```
+
+
+Effect Coding
+```{r}
+custom_contrast <- matrix(c(-1,1), ncol = 1) # defining a custom contrast where fem is -1 and male is 1
+rownames(custom_contrast) <- c("Female", "Male")
+MRI$sex <- factor(MRI$sex, levels = c("Female", "Male"))
+contrasts(MRI$sex) <- custom_contrast
+
+contrasts(MRI$sex)
+```
+
+
+Figure 4B
+```{r}
+formula <- as.formula("PC1_temporal ~ age + age_squared + sex + EPSS + EPSS:sex")
+
+MRI_subset <- na.omit(MRI)
+
+fit1 <- lm(formula, data = MRI_subset) # fit the model
+
+predictions <- emmeans(
+  fit1,
+  ~ EPSS | sex,
+  at = list(
+    EPSS = seq(
+      min(MRI$EPSS, na.rm = TRUE),
+      max(MRI$EPSS, na.rm = TRUE),
+      length.out = 100
+    )
+  ),
+  conf.int = TRUE
+)
+
+predicted_df <- as.data.frame(predictions) %>%
+  mutate(x_original = EPSS * Z_score_stats$sd_EPSS + Z_score_stats$mean_EPSS,
+    predicted_original = emmean * Z_score_stats$sd_PC1_temporal + Z_score_stats$mean_PC1_temporal,
+    conf_low_original = lower.CL * Z_score_stats$sd_PC1_temporal + Z_score_stats$mean_PC1_temporal,
+    conf_high_original = upper.CL * Z_score_stats$sd_PC1_temporal + Z_score_stats$mean_PC1_temporal)
+
+whole_title <- "PCE vs ESS Score in the Temporal Lobe"
+
+plot_roi <- ggplot() +
+  geom_point(data = MRI, aes(x = EPSS_original, y = PC1_temporal_original, color = sex), alpha = 0.5, size = 3) +
+  geom_line(data = predicted_df, aes(x = x_original, y = predicted_original, color = sex), linewidth = 1) +
+  geom_ribbon(data = predicted_df, aes(x = x_original, ymin = conf_low_original, ymax = conf_high_original, fill = sex), alpha = 0.2) +
+  
+  theme_classic() +
+  
+  # Uncommenting this section makes it the same dimensions as the one in the paper (since it won't have a legend)
+  # theme(
+  #   axis.ticks = element_line(linewidth = 0.75),
+  #   axis.ticks.length = unit(0.3, "cm"),
+  #   axis.line = element_line(linewidth = 0.75),
+  #   legend.position = "none"
+  # ) +
+  
+  labs(title = whole_title, x = "ESS Score", y = "PC1_temporal") + 
+  
+  scale_color_manual(values = c("Male" = "#00A3C4", "Female" = "#E63946")) +
+  scale_fill_manual(values = c("Male" = "#00A3C4", "Female" = "#E63946"))
+  
+print(plot_roi)
+```
+
+
+
+
